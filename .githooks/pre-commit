@@ -1,0 +1,4 @@
+#!/bin/sh
+# 提交前扫描疑似密钥；发现即阻止提交。
+# 启用：git config core.hooksPath .githooks
+python "$(dirname "$0")/../scripts/check-secrets.py" --staged || exit 1

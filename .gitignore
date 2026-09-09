@@ -1,0 +1,21 @@
+# 本地运行产物（含机器相关的备份，不要提交）
+backup/
+__pycache__/
+*.py[cod]
+
+# 密钥与环境变量：永远不要提交
+.env
+.env.*
+*.key
+*.pem
+*.p12
+secrets.*
+config.local.*
+*credentials*
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini

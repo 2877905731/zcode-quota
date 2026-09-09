@@ -1,0 +1,5 @@
+{
+  "name": "api-quota",
+  "version": "1.0.0",
+  "description": "查看当前模型 API 的剩余余额与生成速度：/quota 命令、会话启动自动注入状态、可选常驻悬浮窗"
+}
