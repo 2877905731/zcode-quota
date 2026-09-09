@@ -1,4 +1,9 @@
 #!/bin/sh
 # 提交前扫描疑似密钥；发现即阻止提交。
 # 启用：git config core.hooksPath .githooks
-python "$(dirname "$0")/../scripts/check-secrets.py" --staged || exit 1
+PY=$(command -v python3 || command -v python)
+if [ -z "$PY" ]; then
+    echo "check-secrets: 没找到 python，跳过本地扫描（CI 里仍会检查）" >&2
+    exit 0
+fi
+"$PY" "$(dirname "$0")/../scripts/check-secrets.py" --staged || exit 1
