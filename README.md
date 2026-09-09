@@ -21,26 +21,29 @@
 
 ## 安装
 
+**方式一：下载发布包**（推荐）
+
+从 [Releases](https://github.com/2877905731/zcode-quota/releases) 下载 zip，
+解压到 `~/.zcode/local-plugins/api-quota`，然后按顺序双击：
+
+1. `安装.cmd` —— 注册插件目录 + 启动数据服务
+2. `应用界面补丁.cmd` —— 注入状态条
+3. 重启 ZCode
+
+**方式二：git clone**
+
 ```bash
 git clone https://github.com/2877905731/zcode-quota.git ~/.zcode/local-plugins/api-quota
+cd ~/.zcode/local-plugins/api-quota
+python scripts/install.py               # 等价于双击 安装.cmd
+python scripts/patch-zcode.py --apply   # 等价于双击 应用界面补丁.cmd
 ```
 
-把插件目录注册到 `~/.zcode/cli/config.json`（`plugins.dirs` 里的每一项就是一个插件根目录）：
+`安装.cmd` 会把插件目录写进 `~/.zcode/cli/config.json` 的 `plugins.dirs`
+（`dirs` 里的每一项就是一个插件根目录），改之前先备份成 `config.json.bak`。
+它也会检查 Python 版本和 tkinter。
 
-```json
-{
-  "plugins": {
-    "dirs": ["C:\\Users\\<你>\\.zcode\\local-plugins\\api-quota"]
-  }
-}
-```
-
-然后：
-
-1. 双击 `启动余额服务.cmd`（或把 `启动` 文件夹里的 VBS 复制过去做开机自启）；
-2. 双击 `应用界面补丁.cmd`，再重启 ZCode。
-
-依赖：Python 3.10+（用标准库，不需要 pip 安装任何东西）、Windows、ZCode 桌面版。
+依赖：Python 3.10+（只用标准库，不需要 pip 安装任何东西）、Windows、ZCode 桌面版。
 
 ## 界面内状态条：原理与代价
 

@@ -1,5 +1,6 @@
 # 本地运行产物（含机器相关的备份，不要提交）
 backup/
+dist/
 __pycache__/
 *.py[cod]
 
