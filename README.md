@@ -115,8 +115,22 @@ python scripts\quota-server.py --standalone  :: 不跟随 ZCode，一直运行
 ## 数据来源
 
 - **余额**：`GET https://api.deepseek.com/user/balance`（目前只实现 DeepSeek，其它服务商提示"暂不支持"）
-- **速度**：`~/.zcode/cli/rollout/model-io-*.jsonl`，取 `outputTokens / durationMs`，用最近 10 次主模型调用的**中位数**
+- **速度**：优先读 ZCode 自己的用量库 `~/.zcode/cli/db/db.sqlite` 的 `model_usage` 表（只读），
+  里面有 `time_to_first_token_ms`，所以能算**纯解码速度**；读不到时回退到
+  `~/.zcode/cli/rollout/model-io-*.jsonl`（没有 TTFT）。`--json` 里的 `source` 会告诉你用了哪个。
 - **服务商**：读 `~/.zcode/v2/config.json`，按最近一次调用记录里的 `providerId` 自动匹配
+
+### 指标口径
+
+| 指标 | 算法 | 说明 |
+| --- | --- | --- |
+| 纯解码速度 | `output / (duration - ttft)` | 模型真正吐字的速度，最有参考价值 |
+| 含预填充速度 | `output / duration` | 把首字等待算进去，偏保守的下界 |
+| 首字延迟 | `time_to_first_token_ms` | 缓存命中时很低 |
+| 缓存命中率 | `cacheRead / input` | 越高越省钱 |
+| 按模型 | 最近 200 次调用分组 | 换模型时可以直接对比 |
+
+速度默认取最近 10 次调用的**中位数**（`API_QUOTA_WINDOW` 可调）。
 
 ## 配置
 
@@ -125,6 +139,9 @@ python scripts\quota-server.py --standalone  :: 不跟随 ZCode，一直运行
 | `API_QUOTA_PORT` | `8788` | 数据服务端口 |
 | `API_QUOTA_REFRESH` | `60` | 悬浮窗刷新间隔（秒） |
 | `API_QUOTA_CACHE` | `30` | 余额查询缓存（秒） |
+| `API_QUOTA_WINDOW` | `10` | 速度取最近多少次调用的中位数 |
+| `API_QUOTA_EXIT_GRACE` | `20` | ZCode 退出后多少秒停止数据服务 |
+| `API_QUOTA_AUTOPATCH` | `1` | 设为 `0` 关闭升级后自动重打补丁 |
 | `ZCODE_HOME` | `~/.zcode` | ZCode 数据目录 |
 
 ## 安全说明
@@ -152,7 +169,9 @@ python scripts\quota-server.py --standalone  :: 不跟随 ZCode，一直运行
 
 ## 已知限制
 
-- 速度包含预填充时间，是偏保守的下界；缓存命中率高时更接近真实解码速度。
+- 纯解码速度依赖 ZCode 用量库里的 `time_to_first_token_ms`；回退到日志模式时只有含预填充的速度。
+- ZCode 的 `db.sqlite` 和 rollout 日志都是它的内部实现，字段可能随版本变化——
+  两边都读不到时插件会显示"暂无调用记录"，不会崩。
 - 余额只支持 DeepSeek，接 GLM / Z.ai 需要补它们的额度接口。
 - 界面补丁仅 Windows 有效（依赖 `app.asar` 的路径与进程检测）。
 - ZCode 升级后状态条会消失（app.asar 被覆盖），但下次启动时会自动重新注入，

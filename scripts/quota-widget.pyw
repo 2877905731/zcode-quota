@@ -150,12 +150,18 @@ class Widget:
 
         bal = snap["balance"]
         spd = snap["speed"]
+        model_info = snap.get("model") or {}
 
-        model = re.sub(r"-expires-on-[\w.-]+$", "", snap.get("model_id") or "") or "--"
+        model = model_info.get("display") or re.sub(
+            r"-expires-on-[\w.-]+$", "", snap.get("model_id") or "") or "--"
         if len(model) > 26:
             model = model[:24] + "…"
         self.title_label.configure(
             text=f"{snap.get('provider_name') or snap.get('provider_id') or 'API'} · {model}")
+
+        decode = spd.get("median_decode_rate")
+        rate = decode if decode is not None else spd.get("median_rate")
+        rate_label = "速度" if decode is not None else "速度(含预填)"
 
         if bal.get("ok"):
             items = bal.get("currencies") or []
@@ -166,19 +172,24 @@ class Widget:
                     fg=GOOD if bal.get("available") else WARN)
                 extra = "  ".join(f"{i['currency']} {i['total']}" for i in items[1:])
                 self.speed_label.configure(
-                    text=f"速度 {self._rate(spd.get('median_rate'))}"
+                    text=f"{rate_label} {self._rate(rate)}"
                          + (f"   {extra}" if extra else ""))
             else:
                 self.balance_label.configure(text="余额未知", fg=WARN)
-                self.speed_label.configure(text=f"速度 {self._rate(spd.get('median_rate'))}")
+                self.speed_label.configure(text=f"{rate_label} {self._rate(rate)}")
         else:
             self.balance_label.configure(text="余额不可用", fg=WARN)
             self.speed_label.configure(
-                text=f"{bal.get('message', '')}  |  速度 {self._rate(spd.get('median_rate'))}")
+                text=f"{bal.get('message', '')}  |  {rate_label} {self._rate(rate)}")
 
         stamp = snap["generated_at"][11:19]
-        self.updated_label.configure(
-            text=f"{stamp} 更新 · {spd.get('samples', 0)} 次采样 · 双击刷新")
+        detail = [f"{stamp} 更新"]
+        if spd.get("median_ttft_ms") is not None:
+            detail.append(f"首字 {spd['median_ttft_ms'] / 1000:.1f}s")
+        if spd.get("cache_hit_rate") is not None:
+            detail.append(f"缓存 {spd['cache_hit_rate'] * 100:.0f}%")
+        detail.append(f"{spd.get('samples', 0)} 次采样")
+        self.updated_label.configure(text=" · ".join(detail))
 
         self.root.after(REFRESH_SECONDS * 1000, self.refresh)
 

@@ -74,9 +74,17 @@
     } else {
       parts.push('余额 ' + (balance.message || '不可用'));
     }
+
     var speed = snap.speed || {};
-    parts.push('速度 ' + fmtRate(speed.median_rate));
-    if (speed.samples) parts.push(speed.samples + ' 次采样');
+    var decode = speed.median_decode_rate;
+    parts.push('速度 ' + fmtRate(decode === null || decode === undefined
+      ? speed.median_rate : decode));
+    if (speed.median_ttft_ms !== null && speed.median_ttft_ms !== undefined) {
+      parts.push('首字 ' + (speed.median_ttft_ms / 1000).toFixed(1) + 's');
+    }
+    if (speed.cache_hit_rate !== null && speed.cache_hit_rate !== undefined) {
+      parts.push('缓存 ' + Math.round(speed.cache_hit_rate * 100) + '%');
+    }
     var stamp = String(snap.generated_at || '').slice(11, 16);
     if (stamp) parts.push(stamp + ' 更新');
     return parts.join('  ·  ');
