@@ -33,7 +33,11 @@ python "${ZCODE_PLUGIN_ROOT}/scripts/quota.py"
 
 ## 指标口径
 
-- **余额**：调用服务商的余额接口。目前实现了 DeepSeek（`GET https://api.deepseek.com/user/balance`），其它服务商会返回"暂不支持自动查询"。
+- **余额 / 额度**：按服务商自动匹配，目前支持
+  DeepSeek（`GET /user/balance`，账户余额）、
+  智谱 / Z.ai（`GET /api/monitor/usage/quota/limit`，Coding Plan 的 5 小时/每周/月度工具额度）、
+  OpenRouter（`GET /api/v1/credits`，剩余 credits）。
+  `balance.kind` 为 `balance`（多币种）或 `quota`（多窗口，带百分比和重置时间）；其它服务商返回"暂不支持自动查询"。
 - **纯解码速度**：`outputTokens / (durationMs - timeToFirstToken)`，模型真正吐字的速度，最有参考价值。
 - **含预填充速度**：`outputTokens / durationMs`，把首字等待也算进去，是偏保守的下界。
 - **首字延迟（TTFT）**：从发请求到第一个 token 的耗时，缓存命中时很低。

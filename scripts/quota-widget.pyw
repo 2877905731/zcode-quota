@@ -162,8 +162,26 @@ class Widget:
         decode = spd.get("median_decode_rate")
         rate = decode if decode is not None else spd.get("median_rate")
         rate_label = "速度" if decode is not None else "速度(含预填)"
+        speed_text = f"{rate_label} {self._rate(rate)}"
 
-        if bal.get("ok"):
+        if bal.get("ok") and bal.get("kind") == "quota":
+            windows = bal.get("windows") or []
+            if windows:
+                primary = windows[0]
+                pct = primary.get("remaining_pct")
+                self.balance_label.configure(
+                    text=f"{primary['label']} {pct:.0f}%" if pct is not None
+                    else f"{primary['label']} 额度",
+                    fg=GOOD if (pct is None or pct >= 20) else WARN)
+                extra = "  ".join(
+                    f"{w['label']} {w['remaining_pct']:.0f}%"
+                    for w in windows[1:3] if w.get("remaining_pct") is not None)
+                self.speed_label.configure(
+                    text=speed_text + (f"   {extra}" if extra else ""))
+            else:
+                self.balance_label.configure(text="额度未知", fg=WARN)
+                self.speed_label.configure(text=speed_text)
+        elif bal.get("ok"):
             items = bal.get("currencies") or []
             if items:
                 primary = items[0]
@@ -172,15 +190,13 @@ class Widget:
                     fg=GOOD if bal.get("available") else WARN)
                 extra = "  ".join(f"{i['currency']} {i['total']}" for i in items[1:])
                 self.speed_label.configure(
-                    text=f"{rate_label} {self._rate(rate)}"
-                         + (f"   {extra}" if extra else ""))
+                    text=speed_text + (f"   {extra}" if extra else ""))
             else:
                 self.balance_label.configure(text="余额未知", fg=WARN)
-                self.speed_label.configure(text=f"{rate_label} {self._rate(rate)}")
+                self.speed_label.configure(text=speed_text)
         else:
             self.balance_label.configure(text="余额不可用", fg=WARN)
-            self.speed_label.configure(
-                text=f"{bal.get('message', '')}  |  {rate_label} {self._rate(rate)}")
+            self.speed_label.configure(text=f"{bal.get('message', '')}  |  {speed_text}")
 
         stamp = snap["generated_at"][11:19]
         detail = [f"{stamp} 更新"]

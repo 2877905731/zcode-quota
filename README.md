@@ -114,11 +114,24 @@ python scripts\quota-server.py --standalone  :: 不跟随 ZCode，一直运行
 
 ## 数据来源
 
-- **余额**：`GET https://api.deepseek.com/user/balance`（目前只实现 DeepSeek，其它服务商提示"暂不支持"）
-- **速度**：优先读 ZCode 自己的用量库 `~/.zcode/cli/db/db.sqlite` 的 `model_usage` 表（只读），
-  里面有 `time_to_first_token_ms`，所以能算**纯解码速度**；读不到时回退到
-  `~/.zcode/cli/rollout/model-io-*.jsonl`（没有 TTFT）。`--json` 里的 `source` 会告诉你用了哪个。
-- **服务商**：读 `~/.zcode/v2/config.json`，按最近一次调用记录里的 `providerId` 自动匹配
+### 余额 / 额度（按服务商自动匹配）
+
+| 服务商 | 接口 | 显示成什么 |
+| --- | --- | --- |
+| DeepSeek | `GET /user/balance` | 账户余额（多币种，含充值与赠送） |
+| 智谱 / Z.ai | `GET /api/monitor/usage/quota/limit` | Coding Plan 套餐额度：5 小时 / 每周 / 月度工具，带百分比和重置时间 |
+| OpenRouter | `GET /api/v1/credits` | 剩余 credits（折算成 USD） |
+
+其它服务商会显示"暂不支持自动查询"。想再加一家：在 `scripts/quota.py` 的
+`fetch_balance()` 里加一个分支，返回 `kind` 为 `balance`（多币种）或 `quota`（多窗口）的结构即可。
+
+### 速度
+
+优先读 ZCode 自己的用量库 `~/.zcode/cli/db/db.sqlite` 的 `model_usage` 表（只读），
+里面有 `time_to_first_token_ms`，所以能算**纯解码速度**；读不到时回退到
+`~/.zcode/cli/rollout/model-io-*.jsonl`（没有 TTFT）。`--json` 里的 `source` 会告诉你用了哪个。
+
+服务商识别：读 `~/.zcode/v2/config.json`，按最近一次调用记录里的 `providerId` 自动匹配。
 
 ### 指标口径
 
@@ -172,7 +185,9 @@ python scripts\quota-server.py --standalone  :: 不跟随 ZCode，一直运行
 - 纯解码速度依赖 ZCode 用量库里的 `time_to_first_token_ms`；回退到日志模式时只有含预填充的速度。
 - ZCode 的 `db.sqlite` 和 rollout 日志都是它的内部实现，字段可能随版本变化——
   两边都读不到时插件会显示"暂无调用记录"，不会崩。
-- 余额只支持 DeepSeek，接 GLM / Z.ai 需要补它们的额度接口。
+- 余额/额度支持 DeepSeek、智谱·Z.ai、OpenRouter 三家，其它服务商提示"暂不支持"。
+- 智谱的套餐额度接口是社区实测的（`/api/monitor/usage/quota/limit`），不同套餐代际
+  返回的窗口数不一样（V1 个人套餐可能只有 5 小时窗口），插件按实际返回渲染，不硬编码。
 - 界面补丁仅 Windows 有效（依赖 `app.asar` 的路径与进程检测）。
 - ZCode 升级后状态条会消失（app.asar 被覆盖），但下次启动时会自动重新注入，
   重启一次 ZCode 即恢复；也可以手动重跑 `应用界面补丁.cmd`。

@@ -65,15 +65,30 @@
     return Math.round(value).toLocaleString('en-US') + ' tok/s';
   }
 
+  function balanceText(balance) {
+    if (!balance.ok) return '余额 ' + (balance.message || '不可用');
+
+    if (balance.kind === 'quota') {
+      var bits = [];
+      var wins = balance.windows || [];
+      for (var i = 0; i < wins.length && bits.length < 3; i++) {
+        var win = wins[i];
+        if (win.remaining_pct !== null && win.remaining_pct !== undefined) {
+          bits.push(win.label + ' ' + Math.round(win.remaining_pct) + '%');
+        }
+      }
+      return '额度 ' + (bits.length ? bits.join(' · ') : '未知');
+    }
+
+    var list = balance.currencies || [];
+    return list.length
+      ? '余额 ' + list[0].currency + ' ' + list[0].total
+      : '余额 ' + (balance.message || '不可用');
+  }
+
   function describe(snap) {
     var parts = [];
-    var balance = snap.balance || {};
-    var list = balance.currencies || [];
-    if (balance.ok && list.length) {
-      parts.push('余额 ' + list[0].currency + ' ' + list[0].total);
-    } else {
-      parts.push('余额 ' + (balance.message || '不可用'));
-    }
+    parts.push(balanceText(snap.balance || {}));
 
     var speed = snap.speed || {};
     var decode = speed.median_decode_rate;

@@ -210,8 +210,121 @@ def _http_json(url: str, api_key: str) -> dict:
         return json.loads(resp.read().decode("utf-8", "replace"))
 
 
+def _reset_text(value) -> str | None:
+    """nextResetTime 可能是毫秒时间戳或 ISO 字符串，统一成 MM-DD HH:MM。"""
+    if value is None:
+        return None
+    moment = None
+    if isinstance(value, (int, float)):
+        seconds = value / 1000 if value > 1e11 else value
+        try:
+            moment = datetime.fromtimestamp(seconds).astimezone()
+        except (OSError, OverflowError, ValueError):
+            return None
+    else:
+        try:
+            moment = datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone()
+        except ValueError:
+            return str(value)
+    return moment.strftime("%m-%d %H:%M")
+
+
+def _glm_window_label(item: dict) -> str:
+    kind = (item.get("type") or "").upper()
+    unit = item.get("unit")
+    if kind == "TOKENS_LIMIT":
+        if unit == 3:
+            return "5 小时"
+        if unit == 6:
+            return "每周"
+    if kind == "TIME_LIMIT":
+        return "月度工具"
+    return f"{kind or '额度'}" + (f"(unit={unit})" if unit is not None else "")
+
+
+def _glm_window(item: dict) -> dict:
+    limit = _to_float(item.get("usage"))
+    used = _to_float(item.get("currentValue"))
+    pct = item.get("percentage")
+
+    remaining_pct = None
+    if pct is not None:
+        remaining_pct = max(0.0, 100.0 - _to_float(pct))
+    elif limit > 0:
+        remaining_pct = max(0.0, 100.0 * (limit - used) / limit)
+
+    remaining = item.get("remaining")
+    if remaining is None and limit > 0:
+        remaining = limit - used
+
+    return {
+        "label": _glm_window_label(item),
+        "remaining_pct": remaining_pct,
+        "remaining": _to_float(remaining) if remaining is not None else None,
+        "limit": limit if limit > 0 else None,
+        "used": used if limit > 0 else None,
+        "reset_at": _reset_text(item.get("nextResetTime")),
+    }
+
+
+def _deepseek_balance(host: str, api_key: str, name: str) -> dict:
+    endpoint = f"https://{host}/user/balance"
+    data = _http_json(endpoint, api_key)
+    currencies = [{
+        "currency": item.get("currency"),
+        "total": item.get("total_balance"),
+        "granted": item.get("granted_balance"),
+        "topped_up": item.get("topped_up_balance"),
+    } for item in (data.get("balance_infos") or [])]
+    # 金额大的排前面：多币种账户里真正在计费的那个通常是主余额
+    currencies.sort(key=lambda c: abs(_to_float(c["total"])), reverse=True)
+    return {
+        "ok": True, "kind": "balance", "provider_name": name, "endpoint": endpoint,
+        "available": bool(data.get("is_available")), "currencies": currencies,
+    }
+
+
+def _glm_quota(host: str, api_key: str, name: str) -> dict:
+    """智谱 / Z.ai 的 Coding Plan 套餐额度（5 小时 / 每周 / 月度工具）。"""
+    endpoint = f"https://{host}/api/monitor/usage/quota/limit"
+    data = _http_json(endpoint, api_key)
+
+    if data.get("success") is False or (data.get("code") not in (None, 200, "200")):
+        return {"ok": False, "provider_name": name,
+                "message": f"{name} 额度查询失败：{data.get('msg') or data.get('message') or '未知错误'}"}
+
+    limits = (data.get("data") or {}).get("limits") or []
+    windows = [_glm_window(item) for item in limits if isinstance(item, dict)]
+    if not windows:
+        return {"ok": False, "provider_name": name,
+                "message": f"{name} 没有返回额度数据（可能不是 Coding Plan 套餐）"}
+
+    return {
+        "ok": True, "kind": "quota", "provider_name": name, "endpoint": endpoint,
+        "available": True, "windows": windows,
+    }
+
+
+def _openrouter_credits(host: str, api_key: str, name: str) -> dict:
+    endpoint = f"https://{host}/api/v1/credits"
+    data = _http_json(endpoint, api_key)
+    info = data.get("data") or {}
+    total = _to_float(info.get("total_credits"))
+    used = _to_float(info.get("total_usage"))
+    return {
+        "ok": True, "kind": "balance", "provider_name": name, "endpoint": endpoint,
+        "available": True,
+        "currencies": [{
+            "currency": "USD",
+            "total": f"{total - used:.2f}",
+            "topped_up": f"{total:.2f}",
+            "granted": "0.00",
+        }],
+    }
+
+
 def fetch_balance(provider: dict) -> dict:
-    """查询余额。目前实现了 DeepSeek，其它服务商返回明确的未支持提示。"""
+    """按服务商查余额或套餐额度。"""
     options = provider.get("options") or {}
     name = provider.get("name") or "未知服务商"
     api_key = (options.get("apiKey") or "").strip()
@@ -223,34 +336,20 @@ def fetch_balance(provider: dict) -> dict:
         return {"ok": False, "provider_name": name, "message": "当前服务商没有配置 baseURL"}
 
     host = urlparse(base_url).hostname or ""
-    if "deepseek" not in host:
-        return {
-            "ok": False,
-            "provider_name": name,
-            "message": f"{name} 暂不支持自动查询余额（目前支持 DeepSeek）",
-        }
-
-    endpoint = f"https://{host}/user/balance"
     try:
-        data = _http_json(endpoint, api_key)
+        if "deepseek" in host:
+            return _deepseek_balance(host, api_key, name)
+        if host.endswith("z.ai") or "bigmodel" in host:
+            return _glm_quota(host, api_key, name)
+        if "openrouter" in host:
+            return _openrouter_credits(host, api_key, name)
     except Exception as exc:  # 网络、鉴权、解析
-        return {"ok": False, "provider_name": name, "message": f"余额查询失败：{exc}"}
-
-    currencies = [{
-        "currency": item.get("currency"),
-        "total": item.get("total_balance"),
-        "granted": item.get("granted_balance"),
-        "topped_up": item.get("topped_up_balance"),
-    } for item in (data.get("balance_infos") or [])]
-    # 金额大的排前面：多币种账户里真正在计费的那个通常是主余额
-    currencies.sort(key=lambda c: abs(_to_float(c["total"])), reverse=True)
+        return {"ok": False, "provider_name": name, "message": f"查询失败：{exc}"}
 
     return {
-        "ok": True,
+        "ok": False,
         "provider_name": name,
-        "endpoint": endpoint,
-        "available": bool(data.get("is_available")),
-        "currencies": currencies,
+        "message": f"{name} 暂不支持自动查询（已支持 DeepSeek / 智谱·Z.ai / OpenRouter）",
     }
 
 
@@ -411,6 +510,50 @@ def _fmt_pct(value) -> str:
     return f"{value * 100:.1f}%" if value is not None else "--"
 
 
+def _balance_lines(bal: dict) -> list[str]:
+    """余额（多币种）或套餐额度（多窗口）都渲染成若干行。"""
+    if not bal.get("ok"):
+        return [f"  {bal.get('message', '查询失败')}"]
+
+    lines = []
+    if bal.get("kind") == "quota":
+        for win in bal.get("windows") or []:
+            pct = win.get("remaining_pct")
+            text = f"  {win['label']}"
+            if pct is not None:
+                text += f"   剩余 {pct:.0f}%"
+            if win.get("limit"):
+                text += f"   （{win.get('remaining') or 0:,.0f}/{win['limit']:,.0f} 积分）"
+            if win.get("reset_at"):
+                text += f"   重置于 {win['reset_at']}"
+            lines.append(text)
+    else:
+        for item in bal.get("currencies") or []:
+            lines.append(
+                f"  {item['currency']}  {item['total']}"
+                f"   （充值 {item['topped_up']} / 赠送 {item['granted']}）"
+            )
+
+    if bal.get("available") is False:
+        lines.append("  状态：不可用")
+    return lines or ["  暂无数据"]
+
+
+def _balance_summary(bal: dict) -> str:
+    """给 hook 用的一行摘要。"""
+    if not bal.get("ok"):
+        return bal.get("message", "查询失败")
+    if bal.get("kind") == "quota":
+        parts = []
+        for win in bal.get("windows") or []:
+            pct = win.get("remaining_pct")
+            if pct is not None:
+                parts.append(f"{win['label']}剩余 {pct:.0f}%")
+        return " / ".join(parts) if parts else "额度未知"
+    parts = [f"{c['currency']} {c['total']}" for c in (bal.get("currencies") or [])]
+    return " / ".join(parts) if parts else "未知"
+
+
 def render_text(snap: dict) -> str:
     out = []
     bal = snap["balance"]
@@ -419,17 +562,9 @@ def render_text(snap: dict) -> str:
     model = snap.get("model") or {}
 
     title = snap.get("provider_name") or snap.get("provider_id") or "当前 API"
-    out.append(f"=== API 余额（{title}）===")
-    if bal.get("ok"):
-        for item in bal.get("currencies") or []:
-            out.append(
-                f"  {item['currency']}  {item['total']}"
-                f"   （充值 {item['topped_up']} / 赠送 {item['granted']}）"
-            )
-        if bal.get("available") is False:
-            out.append("  状态：不可用")
-    else:
-        out.append(f"  {bal.get('message', '查询失败')}")
+    heading = "套餐额度" if bal.get("kind") == "quota" else "API 余额"
+    out.append(f"=== {heading}（{title}）===")
+    out.extend(_balance_lines(bal))
 
     out.append("")
     out.append(f"=== 生成速度（最近 {spd['samples']} 次调用，{snap.get('source')}）===")
@@ -486,15 +621,12 @@ def render_hook(snap: dict) -> str:
     """SessionStart hook 输出：把一行状态注入会话上下文。"""
     bal = snap["balance"]
     spd = snap["speed"]
-    if bal.get("ok"):
-        parts = [f"{c['currency']} {c['total']}" for c in (bal.get("currencies") or [])]
-        balance_text = " / ".join(parts) if parts else "未知"
-    else:
-        balance_text = bal.get("message", "查询失败")
+    balance_text = _balance_summary(bal)
+    balance_word = "额度" if bal.get("kind") == "quota" else "余额"
     rate_text = _fmt_rate(spd.get("median_decode_rate") or spd.get("median_rate")) \
         if spd.get("samples") else "无样本"
     context = (f"[api-quota] {snap.get('provider_name') or snap.get('provider_id')} "
-               f"余额 {balance_text}；最近 {spd.get('samples', 0)} 次调用中位速度 {rate_text}。"
+               f"{balance_word} {balance_text}；最近 {spd.get('samples', 0)} 次调用中位速度 {rate_text}。"
                f"用户问余额/速度时可直接引用，或运行 /quota 重新查询。")
 
     note = recent_repatch_note()
