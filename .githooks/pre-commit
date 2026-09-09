@@ -1,9 +1,18 @@
 #!/bin/sh
 # 提交前扫描疑似密钥；发现即阻止提交。
 # 启用：git config core.hooksPath .githooks
-PY=$(command -v python3 || command -v python)
+#
+# 注意：Windows 上 `python3` 可能是 Microsoft Store 的占位别名，能查到但跑不起来，
+# 所以要实际执行一次才算数。
+PY=""
+for candidate in python python3; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import sys" >/dev/null 2>&1; then
+        PY="$candidate"
+        break
+    fi
+done
 if [ -z "$PY" ]; then
-    echo "check-secrets: 没找到 python，跳过本地扫描（CI 里仍会检查）" >&2
+    echo "check-secrets: 没找到可用的 python，跳过本地扫描（CI 里仍会检查）" >&2
     exit 0
 fi
 "$PY" "$(dirname "$0")/../scripts/check-secrets.py" --staged || exit 1
