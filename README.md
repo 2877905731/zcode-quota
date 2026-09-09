@@ -79,7 +79,8 @@ python scripts\patch-zcode.py --dry-run   :: 只校验长度，不写入
 
 ### 代价
 
-- **每次 ZCode 升级都要重打一次**（升级会覆盖 app.asar），重跑 `应用界面补丁.cmd` 即可；
+- **ZCode 升级会覆盖 app.asar**，补丁随之失效——但下次启动时会自动补回，
+  重启一次 ZCode 即可；也可以手动重跑 `应用界面补丁.cmd`；
 - 这是非官方手段，不受 ZCode 支持，请自行评估风险；
 - 状态条依赖本地数据服务，服务没起来时状态条不显示。
 
@@ -88,11 +89,28 @@ python scripts\patch-zcode.py --dry-run   :: 只校验长度，不写入
 状态条和悬浮窗都依赖它（只监听 127.0.0.1，不对外）：
 
 ```bat
-python scripts\quota-server.py      :: 手动启动
-启动余额服务.cmd                     :: 双击启动
+python scripts\quota-server.py               :: 前台运行，随 ZCode 启停
+python scripts\quota-server.py --ensure      :: 没在跑就后台拉起（钩子用）
+python scripts\quota-server.py --standalone  :: 不跟随 ZCode，一直运行
+启动余额服务.cmd                              :: 双击手动启动（--standalone）
 ```
 
 接口：`GET /quota`（30 秒缓存）、`GET /quota-status.js`（界面脚本）、`GET /health`。
+
+### 生命周期：跟随 ZCode，不用开机自启
+
+服务**不需要开机自启**，也不需要你手动开：
+
+- **ZCode 启动** → 插件的 `SessionStart` 钩子执行 `quota-server.py --ensure`，
+  发现没在跑就后台拉起一个；
+- **ZCode 退出** → 服务每 5 秒检查一次 ZCode 进程，连续 20 秒不在就自己退出。
+
+顺带地，同一个钩子还会跑 `patch-zcode.py --ensure`：**ZCode 升级后补丁被覆盖时，
+下次启动会自动重新注入**（重启一次 ZCode 即可恢复状态条）。
+
+不想让它自动重打？在环境变量里设 `API_QUOTA_AUTOPATCH=0`。
+另外 `--restore` 会写下 `.patch-disabled` 标记，自动重打不会把补丁加回来——
+这也保证了你手动卸载后它不会自己复活。
 
 ## 数据来源
 
@@ -126,17 +144,19 @@ python scripts\quota-server.py      :: 手动启动
 
 ## 卸载
 
-1. `python scripts\patch-zcode.py --restore`（重启 ZCode 后状态条消失）；
-2. 删除启动文件夹里的 `api-quota-server.vbs`；
-3. 把本目录路径从 `~/.zcode/cli/config.json` 的 `plugins.dirs` 里删掉；
+1. `python scripts\patch-zcode.py --restore` —— 还原补丁并写下 `.patch-disabled`
+   （否则下次 ZCode 启动会被自动重打），重启 ZCode 后状态条消失；
+2. 把本目录路径从 `~/.zcode/cli/config.json` 的 `plugins.dirs` 里删掉；
+3. 结束正在跑的 `quota-server.py` 进程（或等 ZCode 退出后它会自己停）；
 4. 删除本目录。
 
 ## 已知限制
 
 - 速度包含预填充时间，是偏保守的下界；缓存命中率高时更接近真实解码速度。
 - 余额只支持 DeepSeek，接 GLM / Z.ai 需要补它们的额度接口。
-- 界面补丁仅 Windows 有效（依赖 `app.asar` 的路径与 PowerShell 探测进程）。
-- ZCode 升级后状态条会消失（app.asar 被覆盖），重跑一次 `应用界面补丁.cmd` 即可。
+- 界面补丁仅 Windows 有效（依赖 `app.asar` 的路径与进程检测）。
+- ZCode 升级后状态条会消失（app.asar 被覆盖），但下次启动时会自动重新注入，
+  重启一次 ZCode 即恢复；也可以手动重跑 `应用界面补丁.cmd`。
 
 ## License
 

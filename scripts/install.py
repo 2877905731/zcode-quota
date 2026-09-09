@@ -30,6 +30,10 @@ CONFIG = ZCODE_HOME / "cli" / "config.json"
 PORT = int(os.environ.get("API_QUOTA_PORT", "8788"))
 HEALTH = f"http://127.0.0.1:{PORT}/health"
 
+# 早期版本用开机自启跑服务，现在改成随 ZCode 启停，装的时候顺手清掉
+LEGACY_AUTOSTART = (Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" /
+                    "Start Menu" / "Programs" / "Startup" / "api-quota-server.vbs")
+
 
 def log(msg: str = "") -> None:
     print(msg, flush=True)
@@ -71,6 +75,16 @@ def register_plugin() -> str:
     CONFIG.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n",
                       encoding="utf-8")
     return f"已把插件目录写进 plugins.dirs：{target}"
+
+
+def remove_legacy_autostart() -> str:
+    if not LEGACY_AUTOSTART.is_file():
+        return ""
+    try:
+        LEGACY_AUTOSTART.unlink()
+        return f"已移除旧的开机自启项 {LEGACY_AUTOSTART.name}（现在改为随 ZCode 启停）"
+    except OSError as exc:
+        return f"移除开机自启项失败：{exc}"
 
 
 def service_running() -> bool:
@@ -117,6 +131,9 @@ def main() -> int:
 
     log(f"[1/2] {register_plugin()}")
     log(f"[2/2] {start_service()}")
+    legacy = remove_legacy_autostart()
+    if legacy:
+        log(f"      {legacy}")
     log()
     log("-" * 46)
     log("接下来：")
@@ -124,9 +141,10 @@ def main() -> int:
     log("  2) 重启 ZCode")
     log("  之后输入框下方就会常驻显示余额和速度。")
     log()
-    log("可选：")
-    log("  - 双击 启动余额悬浮窗.cmd 可以再开一个置顶小窗")
-    log("  - 把 启动 文件夹里的 VBS 复制过去可让数据服务开机自启")
+    log("说明：")
+    log("  - 数据服务随 ZCode 启停，由 SessionStart 钩子拉起，不占开机自启")
+    log("  - ZCode 升级后界面补丁会在下次启动时自动补回，重启一次即恢复")
+    log("  - 想再开一个置顶小窗：双击 启动余额悬浮窗.cmd")
     return 0 if not problems else 1
 
 

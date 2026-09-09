@@ -27,11 +27,20 @@ import os
 import re
 import struct
 import sys
+from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 BACKUP_DIR = HERE.parent / "backup"
 RENDERER_FILE = "out/renderer/index.html"
+
+# --restore 之后写这个标记，--ensure 就不会把补丁偷偷加回来
+DISABLED_MARKER = BACKUP_DIR / ".patch-disabled"
+# --ensure 自动重打成功后写这个文件，供 /quota 提示用户
+REPATCH_STATE = BACKUP_DIR / "repatch.json"
+
+_QUIET = False
+_LOG: list[str] = []
 
 
 # 插到 </body> 前；带 5 次重试，避免数据服务还没起来时加载失败
@@ -44,7 +53,24 @@ LOADER = (
 
 
 def log(msg: str = "") -> None:
+    """--ensure 是给钩子调的，stdout 必须是干净的，所以那时改为写日志文件。"""
+    if _QUIET:
+        _LOG.append(msg)
+        return
     print(msg, flush=True)
+
+
+def flush_log(name: str) -> None:
+    if not _LOG:
+        return
+    try:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with (BACKUP_DIR / name).open("a", encoding="utf-8") as fh:
+            fh.write(f"\n--- {stamp} ---\n" + "\n".join(_LOG) + "\n")
+    except OSError:
+        pass
+    _LOG.clear()
 
 
 # --------------------------------------------------------------------------
@@ -229,6 +255,7 @@ def cmd_apply(asar: Path, dry_run: bool, relaunch: bool) -> int:
         encoding="utf-8")
 
     write_region(asar, data_start, entry, patched)
+    DISABLED_MARKER.unlink(missing_ok=True)
 
     # 读回校验
     with asar.open("rb") as fh:
@@ -264,8 +291,67 @@ def cmd_restore(asar: Path) -> int:
     with asar.open("rb") as fh:
         if read_entry(fh, data_start, entry) != original:
             raise SystemExit("还原校验失败")
+
+    # 打上标记，避免 --ensure 在下次 ZCode 启动时又把补丁加回来
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    DISABLED_MARKER.write_text("restored\n", encoding="utf-8")
+    REPATCH_STATE.unlink(missing_ok=True)
     log("已还原到原始 index.html（重启 ZCode 后状态条消失）")
+    log("已设置 .patch-disabled 标记，自动重打不会把它加回来；")
+    log("想恢复自动注入请重新运行 --apply。")
     return 0
+
+
+def cmd_ensure(asar: Path) -> int:
+    """给 SessionStart 钩子用：补丁不在就自动补上（ZCode 升级后自愈）。
+
+    要求 stdout 干净（钩子输出会被当作 JSON 解析），所以日志写文件。
+    """
+    global _QUIET
+    _QUIET = True
+
+    if os.environ.get("API_QUOTA_AUTOPATCH", "1") == "0":
+        return 0
+    if DISABLED_MARKER.is_file():
+        return 0
+
+    try:
+        data_start, entry = html_entry(asar)
+        with asar.open("rb") as fh:
+            original = read_entry(fh, data_start, entry)
+        if b"quota-status.js" in original:
+            return 0
+
+        patched = build_loader_html(original)
+        if patched == original:
+            return 0
+
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        backup = BACKUP_DIR / "index.html.orig"
+        if not backup.is_file() or backup.read_bytes() != original:
+            backup.write_bytes(original)
+        (BACKUP_DIR / "index.html.meta.json").write_text(
+            json.dumps({"asar": str(asar), "offset": int(entry["offset"]),
+                        "size": int(entry["size"])}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+
+        write_region(asar, data_start, entry, patched)
+        with asar.open("rb") as fh:
+            if read_entry(fh, data_start, entry) != patched:
+                log("写回校验失败，已放弃")
+                flush_log("patch.log")
+                return 1
+
+        REPATCH_STATE.write_text(
+            json.dumps({"at": datetime.now().astimezone().isoformat(timespec="seconds")}),
+            encoding="utf-8")
+        log("检测到界面补丁缺失（多半是 ZCode 升级过），已自动重新注入")
+        flush_log("patch.log")
+        return 0
+    except Exception as exc:
+        log(f"自动注入失败：{exc}")
+        flush_log("patch.log")
+        return 0
 
 
 def main() -> int:
@@ -276,6 +362,8 @@ def main() -> int:
     group.add_argument("--apply", action="store_true", help="打补丁")
     group.add_argument("--restore", action="store_true", help="还原")
     group.add_argument("--dry-run", action="store_true", help="只校验，不写入")
+    group.add_argument("--ensure", action="store_true",
+                       help="补丁缺失就自动补上（钩子用，输出静默）")
     parser.add_argument("--relaunch", action="store_true", help="打完后自动启动 ZCode")
     args = parser.parse_args()
 
@@ -284,6 +372,8 @@ def main() -> int:
         return cmd_check(asar)
     if args.restore:
         return cmd_restore(asar)
+    if args.ensure:
+        return cmd_ensure(asar)
     return cmd_apply(asar, dry_run=args.dry_run, relaunch=args.relaunch)
 
 

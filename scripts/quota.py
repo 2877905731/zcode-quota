@@ -31,6 +31,7 @@ except Exception:
 ZCODE_HOME = Path(os.environ.get("ZCODE_HOME") or Path.home() / ".zcode")
 ROLLOUT_DIR = ZCODE_HOME / "cli" / "rollout"
 PROVIDER_CONFIG = ZCODE_HOME / "v2" / "config.json"
+REPATCH_STATE = Path(__file__).resolve().parent.parent / "backup" / "repatch.json"
 
 DEFAULT_WINDOW = 10
 TAIL_BYTES = 1024 * 1024
@@ -293,6 +294,19 @@ def render_text(snap: dict) -> str:
     return "\n".join(out)
 
 
+def recent_repatch_note(max_age_seconds: int = 900) -> str:
+    """ZCode 升级后补丁被自动重打过的话，提示一句（15 分钟内有效）。"""
+    try:
+        state = json.loads(REPATCH_STATE.read_text(encoding="utf-8"))
+        at = datetime.fromisoformat(state["at"])
+        age = (datetime.now().astimezone() - at).total_seconds()
+    except Exception:
+        return ""
+    if age > max_age_seconds:
+        return ""
+    return " 另：刚检测到 ZCode 升级并自动重新注入了界面补丁，重启 ZCode 后状态条才会出现。"
+
+
 def render_hook(snap: dict) -> str:
     """SessionStart hook 输出：把一行状态注入会话上下文。"""
     bal = snap["balance"]
@@ -306,6 +320,10 @@ def render_hook(snap: dict) -> str:
     context = (f"[api-quota] {snap.get('provider_name') or snap.get('provider_id')} "
                f"余额 {balance_text}；最近 {spd.get('samples', 0)} 次调用中位速度 {rate_text}。"
                f"用户问余额/速度时可直接引用，或运行 /quota 重新查询。")
+
+    note = recent_repatch_note()
+    if note:
+        context += note
     return json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
