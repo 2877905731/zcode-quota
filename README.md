@@ -1,23 +1,48 @@
 # zcode-quota
 
-在 ZCode 输入框下方常驻显示当前模型 API 的**剩余余额**与**生成速度**。
+在 ZCode 输入框下方常驻显示当前模型 API 的**剩余余额 / 套餐额度**与**生成速度**。
 
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
+按服务商的计费接口自动选择展示方式——账户余额显示成金额，套餐额度显示成百分比窗口：
+
 ```
-                                              余额 USD 5.70 · 速度 222 tok/s · 8 次采样 · 10:26 更新
+余额 USD 4.85 · 速度 290 tok/s · 首字 4.7s · 缓存 100% · 14:10 更新
+额度 5 小时 65% · 每周 15% · 速度 120 tok/s · 首字 0.8s · 14:10 更新
 ```
 
 ## 功能
 
 | 方式 | 怎么用 | 说明 |
 | --- | --- | --- |
-| **界面内状态条** | 双击 `应用界面补丁.cmd`，然后重启 ZCode | 输入框正下方一行小字，真正的"内嵌" |
+| **界面内状态条** | 双击 `应用界面补丁.cmd`，然后重启 ZCode | 输入框正下方一行小字，余额/额度 + 速度，真正的"内嵌" |
 | 悬浮窗 | 双击 `启动余额悬浮窗.cmd` | 置顶小窗，每 60 秒刷新，单实例 |
-| `/quota` 命令 | 输入框打 `/quota` | 结果输出在对话里 |
-| 会话启动注入 | 自动 | 新会话开始时把一行余额/速度注入上下文 |
+| `/quota` 命令 | 输入框打 `/quota` | 完整报告输出在对话里，含按模型分组的对比 |
+| 会话启动注入 | 自动 | 新会话开始时把一行余额/额度 + 速度注入上下文 |
+
+<details>
+<summary><code>/quota</code> 的输出示例</summary>
+
+```
+=== API 余额（ds）===
+  USD  4.85   （充值 4.85 / 赠送 0.00）
+
+=== 生成速度（最近 10 次调用，sqlite）===
+  纯解码    290 tok/s（中位）   最近一次 276 tok/s
+  含预填充  52 tok/s（中位）   区间 23 tok/s ~ 92 tok/s
+  首字延迟  4,301 ms（中位）   缓存命中 99.9%
+  区间用量  输出 4,127 tok / 输入 4,250,724 tok（缓存 4,247,552 tok）
+
+=== 按模型（最近 200 次调用）===
+  deepseek-v4.1-flash   180 次   纯解码 315 tok/s   首字 1,247 ms   缓存 99.5%
+
+=== 本次会话 ===  deepseek-v4.1-flash
+  调用 184 次，累计输出 181,674 tok / 输入 49,387,219 tok
+```
+
+</details>
 
 ## 安装
 
@@ -65,8 +90,9 @@ loader 自己不干活，它从本机 `http://127.0.0.1:8788/quota-status.js` �
 ```bat
 python scripts\patch-zcode.py --check     :: 查看状态
 python scripts\patch-zcode.py --apply     :: 打补丁（不用退出 ZCode）
-python scripts\patch-zcode.py --restore   :: 还原
+python scripts\patch-zcode.py --restore   :: 还原（并禁止自动重打）
 python scripts\patch-zcode.py --dry-run   :: 只校验长度，不写入
+python scripts\patch-zcode.py --ensure    :: 补丁缺失就补上（SessionStart 钩子用）
 ```
 
 双击 `应用界面补丁.cmd` 等价于 `--check` + `--apply`。
@@ -162,7 +188,7 @@ python scripts\quota-server.py --standalone  :: 不跟随 ZCode，一直运行
 这个工具会接触你的 API Key，所以设计上做了这些约束：
 
 - **仓库里没有任何密钥**。脚本在运行时从 `~/.zcode/v2/config.json` 读取 Key，
-  只发给你自己的服务商（DeepSeek），不经过任何第三方。
+  只发给你自己配置的那个服务商，不经过任何第三方。
 - **数据服务只监听 `127.0.0.1`**，不对外网开放，也不写日志。
 - **仓库带密钥扫描**：`scripts/check-secrets.py` 会扫 `sk-`、JWT、Bearer 字面量、
   硬编码密钥赋值、私钥文件头等模式。
