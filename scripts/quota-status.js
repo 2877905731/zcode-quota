@@ -65,6 +65,18 @@
     return Math.round(value).toLocaleString('en-US') + ' tok/s';
   }
 
+  // 保留一位小数，但不足 100% 时不显示成 100%（反之也不把 0.04% 显示成 0%），
+  // 否则缓存命中 99.94% 会被四舍五入成"100%"，看起来像完美的。
+  function fmtPct(value) {
+    if (value === null || value === undefined || !isFinite(value)) return '--';
+    var rounded = Math.round(value * 10) / 10;
+    if (value < 100 && rounded >= 100) rounded = 99.9;
+    if (value > 0 && rounded <= 0) rounded = 0.1;
+    var text = rounded.toFixed(1);
+    if (text.slice(-2) === '.0') text = text.slice(0, -2);
+    return text + '%';
+  }
+
   function balanceText(balance) {
     if (!balance.ok) return '余额 ' + (balance.message || '不可用');
 
@@ -74,7 +86,7 @@
       for (var i = 0; i < wins.length && bits.length < 3; i++) {
         var win = wins[i];
         if (win.remaining_pct !== null && win.remaining_pct !== undefined) {
-          bits.push(win.label + ' ' + Math.round(win.remaining_pct) + '%');
+          bits.push(win.label + ' ' + fmtPct(win.remaining_pct));
         }
       }
       return '额度 ' + (bits.length ? bits.join(' · ') : '未知');
@@ -98,7 +110,7 @@
       parts.push('首字 ' + (speed.median_ttft_ms / 1000).toFixed(1) + 's');
     }
     if (speed.cache_hit_rate !== null && speed.cache_hit_rate !== undefined) {
-      parts.push('缓存 ' + Math.round(speed.cache_hit_rate * 100) + '%');
+      parts.push('缓存 ' + fmtPct(speed.cache_hit_rate * 100));
     }
     var stamp = String(snap.generated_at || '').slice(11, 16);
     if (stamp) parts.push(stamp + ' 更新');

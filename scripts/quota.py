@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sqlite3
@@ -506,8 +507,39 @@ def _fmt_ms(value) -> str:
     return f"{value:,.0f} ms" if value is not None else "--"
 
 
+def fmt_pct(value, decimals: int = 1) -> str:
+    """百分比格式化。
+
+    保留一位小数，但**不足 100% 时不显示成 100%**（反之也不把 0.04% 显示成 0%）——
+    否则缓存命中 99.94% 会被四舍五入成"100%"，看起来像完美的，实际不是。
+    """
+    if value is None:
+        return "--"
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return "--"
+
+    # 用 floor(x+0.5) 而不是 round()：Python 的 round 是银行家舍入，
+    # 会在 99.85 这种值上和 JS 的 Math.round 差 0.1，导致两个界面显示不一致。
+    scale = 10 ** decimals
+    rounded = math.floor(abs(value) * scale + 0.5) / scale
+    if value < 0:
+        rounded = -rounded
+    if value < 100 and rounded >= 100:
+        rounded = 100 - 10 ** (-decimals)
+    elif value > 0 and rounded <= 0:
+        rounded = 10 ** (-decimals)
+
+    text = f"{rounded:.{decimals}f}"
+    if decimals:
+        text = text.rstrip("0").rstrip(".")     # 100.0 -> 100，65.0 -> 65
+    return text + "%"
+
+
 def _fmt_pct(value) -> str:
-    return f"{value * 100:.1f}%" if value is not None else "--"
+    """入参是 0~1 的比例。"""
+    return fmt_pct(value * 100) if value is not None else "--"
 
 
 def _balance_lines(bal: dict) -> list[str]:
@@ -521,7 +553,7 @@ def _balance_lines(bal: dict) -> list[str]:
             pct = win.get("remaining_pct")
             text = f"  {win['label']}"
             if pct is not None:
-                text += f"   剩余 {pct:.0f}%"
+                text += f"   剩余 {fmt_pct(pct)}"
             if win.get("limit"):
                 text += f"   （{win.get('remaining') or 0:,.0f}/{win['limit']:,.0f} 积分）"
             if win.get("reset_at"):
@@ -548,7 +580,7 @@ def _balance_summary(bal: dict) -> str:
         for win in bal.get("windows") or []:
             pct = win.get("remaining_pct")
             if pct is not None:
-                parts.append(f"{win['label']}剩余 {pct:.0f}%")
+                parts.append(f"{win['label']}剩余 {fmt_pct(pct)}")
         return " / ".join(parts) if parts else "额度未知"
     parts = [f"{c['currency']} {c['total']}" for c in (bal.get("currencies") or [])]
     return " / ".join(parts) if parts else "未知"

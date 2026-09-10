@@ -170,11 +170,11 @@ class Widget:
                 primary = windows[0]
                 pct = primary.get("remaining_pct")
                 self.balance_label.configure(
-                    text=f"{primary['label']} {pct:.0f}%" if pct is not None
+                    text=f"{primary['label']} {quota.fmt_pct(pct)}" if pct is not None
                     else f"{primary['label']} 额度",
                     fg=GOOD if (pct is None or pct >= 20) else WARN)
                 extra = "  ".join(
-                    f"{w['label']} {w['remaining_pct']:.0f}%"
+                    f"{w['label']} {quota.fmt_pct(w['remaining_pct'])}"
                     for w in windows[1:3] if w.get("remaining_pct") is not None)
                 self.speed_label.configure(
                     text=speed_text + (f"   {extra}" if extra else ""))
@@ -203,7 +203,7 @@ class Widget:
         if spd.get("median_ttft_ms") is not None:
             detail.append(f"首字 {spd['median_ttft_ms'] / 1000:.1f}s")
         if spd.get("cache_hit_rate") is not None:
-            detail.append(f"缓存 {spd['cache_hit_rate'] * 100:.0f}%")
+            detail.append(f"缓存 {quota.fmt_pct(spd['cache_hit_rate'] * 100)}")
         detail.append(f"{spd.get('samples', 0)} 次采样")
         self.updated_label.configure(text=" · ".join(detail))
 
